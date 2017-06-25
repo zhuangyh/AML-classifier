@@ -6,17 +6,11 @@ library(flowCore)
 library(flowViz)
 library(rsconnect)
 
-
-rsconnect::setAccountInfo(name='zhuangy',
-                          token='7837199EB1A176C065B89EC08BDCE029',
-                          secret='rtGK3V5CWtdfZTl3xpWlFm/oHAYT0j8veH5DC7jI')
-
-
-setwd("~/Downloads/FlowCAP-II/Data/AML/AML-App/AML-dashboard")
 skin <- Sys.getenv("DASHBOARD_SKIN")
 skin <- tolower(skin)
 if (skin == "")
   skin <- "blue"
+
 
 sidebar <- dashboardSidebar(
   
@@ -24,23 +18,17 @@ sidebar <- dashboardSidebar(
     menuItem("Dashboard", tabName = "dashboard", icon = icon("dashboard")),
     menuItem("About", icon = icon("th"), tabName = "About"),
     menuItem("Test setup", icon = icon("th"), tabName = "Testsetup"),
-#     menuItem("Tesing samples", icon = icon("bar-chart-o"),
-#              menuSubItem("Healthy sample", tabName = "Healthysample"),
-#              menuSubItem("AML sample", tabName = "AMLsample")
-#     ),
     menuItem("Upload FCS File", tabName = "uploadData", icon = icon("table"),
              h6("Upload FCS File"),fileInput("file", label = h3("file"))),
-
     menuItem("Testing samples", icon = icon("bar-chart-o"),
              menuSubItem("Healthy sample", tabName = "Healthysample"),
-             menuSubItem("AML sample", tabName = "AMLsample")
-    ),
+             menuSubItem("AML sample", tabName = "AMLsample")),
     
     menuItem("Sample files for testing", icon = icon("download"),
-         href = "https://github.com/zhuangyh"),
+         href = "https://github.com/zhuangyh/AML-classifier/tree/master/Sample%20flies"),
 
     menuItem("Source codes", icon = icon("file-code-o"),
-             href = "https://github.com/zhuangyh"
+             href = "https://github.com/zhuangyh/AML-classifier"
     )
   )
 )
@@ -87,22 +75,21 @@ body <- dashboardBody(
                 plotOutput("plot3", height = 240),
                 height = 300
               )
-            )
             ),
-    tabItem("About", 
-  h3("This web-app was autodiagnosis tool for acute myeloid leukemia (AML) using a machine learning-powered system. 
-The mode was trained with 43 AML patients and 43 healthy controls with test D results (flow cytometry data). The random forest method was used and the accurcy was around 92%. 
-")
-  
-  #tags$img(src='AML_image',height='300',width='300')
-  ),
+            # embed google slides
+            htmlOutput("frame")
+        ),
     
-   tabItem("Testsetup", h4("Here is the setup for test D."), 
+    tabItem("About", h3("This web-app is an automatic diagnosis tool for of Acute Myeloid Leukemia (one of blood cancer) using flow cytometry Data. 
+The accuracy of predicted diagnosis is about 94%.")
+  #tags$img(src='AML_image',height='300',width='300')
+          ),
+    
+   tabItem("Testsetup", h4("Here is the test setup for flow cytometry."), 
            dataTableOutput('testtable')   
            ),
   
    tabItem("Healthysample", 
-             
              # Top panel for tesing samples
              fluidRow(
                # first box for displaying density plot 
@@ -125,7 +112,7 @@ The mode was trained with 43 AML patients and 43 healthy controls with test D re
                  height = 300
                )
              ),
-#              
+           
              # Bottom panel for typical healthy and AML results
              fluidRow(
                # Healthy control
@@ -142,13 +129,13 @@ The mode was trained with 43 AML patients and 43 healthy controls with test D re
                  plotOutput("plot31", height = 240),
                  height = 300
                )
-             )
+             ),
+          # embed google slides 
+          htmlOutput("frame1")
             ), 
+
   
-  
-  
-  
-     tabItem("AMLsample",              # Top panel for tesing samples
+     tabItem("AMLsample",         # Top panel for preloaded tesing samples
              fluidRow(
                # first box for displaying density plot 
                box(
@@ -187,7 +174,8 @@ The mode was trained with 43 AML patients and 43 healthy controls with test D re
                  plotOutput("plot32", height = 240),
                  height = 300
                )
-             )
+             ),
+             htmlOutput("frame2")
      ) 
     
     )
@@ -206,7 +194,6 @@ header <- dashboardHeader(
 
 ui <- dashboardPage(header, sidebar, body, skin = skin)
 
-
 subdata2Train <- read.table("subdata2Train.txt")
 set.seed(0981)
 fit3 <- randomForest(as.factor(Class) ~ .,
@@ -220,8 +207,13 @@ aml1<-read.FCS("0036.FCS", alter.names=TRUE)
 healthy2<-read.FCS("0012.FCS",  alter.names=TRUE)
 aml2<-read.FCS("0068.FCS", alter.names=TRUE)
 
-# healthyplot <- densityplot(~ `FL4.log`, data=healthy1, xlim=c(0,1000))
-# amlplot <- densityplot(~ `FL4.log`, data=aml1, xlim=c(0,1000))
+lgcl <- logicleTransform( w = 0.5, t= 10000, m =4.5)
+trans_individual <- transformList(c("FL1.Log", "FL2.Log", "FL3.Log", "FL4.Log", "FL5.Log"), lgcl)
+healthy1 <- transform(healthy1, trans_individual)
+healthy2 <- transform(healthy2, trans_individual)
+aml1 <- transform(aml1, trans_individual)
+aml2 <- transform(aml2, trans_individual)
+
 
 
 server <- function(input, output) {
@@ -230,7 +222,7 @@ server <- function(input, output) {
   output$testtable = renderDataTable({
     testtable <- read.csv("testsetup.csv", sep=",")
     testtable
-  })
+  }, options = list(dom = 't'))
   
   output$text1 <- renderText({ 
     if (is.null(input$file)) return()
@@ -289,48 +281,73 @@ server <- function(input, output) {
     if (Appprediction == "normal") return  (paste("Healthy", "(", prob2, "% probability)"))  
   })
   
-  
-  
-  
+  # render density plot of uploaded sample
   output$plot1 <- renderPlot({
     if (is.null(input$file)) return()
-    densityplot(~ `FL4.log`, data=read.FCS("uploaded.FCS",  alter.names=TRUE), xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=transform(read.FCS("uploaded.FCS",  alter.names=TRUE), trans_individual), xlab="CD16", ylab="Density")        
     })
   
-  
+  # render density plot of healthy control
   output$plot2 <- renderPlot({
-    densityplot(~ `FL4.log`, data=healthy1, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=healthy1, xlab="CD16", ylab="Density")        
   })
   
+  # render density plot of AML case
   output$plot3 <- renderPlot({
-    densityplot(~ `FL4.log`, data=aml1, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=aml1, xlab="CD16", ylab="Density")        
   })
   
   
   output$plot21 <- renderPlot({
-    densityplot(~ `FL4.log`, data=healthy1, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=healthy1, xlab="CD16", ylab="Density")        
   })
   
   output$plot31 <- renderPlot({
-    densityplot(~ `FL4.log`, data=aml1, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=aml1, xlab="CD16", ylab="Density")        
   })
   
   output$plot22 <- renderPlot({
-    densityplot(~ `FL4.log`, data=healthy1, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=healthy1, xlab="CD16", ylab="Density")        
   })
   
   output$plot32 <- renderPlot({
-    densityplot(~ `FL4.log`, data=aml1, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=aml1, xlab="CD16", ylab="Density")        
   })
   
   output$healthy <- renderPlot({
-    densityplot(~ `FL4.log`, data=healthy2, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=healthy2, xlab="CD16", ylab="Density")        
   })
   
   output$aml <- renderPlot({
-    densityplot(~ `FL4.log`, data=aml2, xlim=c(0,1000), xlab="CD16", ylab="Density")        
+    densityplot(~ `FL4.log`, data=aml2, xlab="CD16", ylab="Density")        
   })
   
+  output$frame <- renderUI({
+    tags$iframe(src="https://docs.google.com/presentation/d/1_ymakXkcVZJLOYZ6lp1sMMfB9bjWN0FA06cvKqrmIfU/embed?start=false&loop=false&delayms=3000",
+                width = 900,
+                height = 528.57,
+                frameborder = 0,
+                allowfullscreen="allowfullscreen",
+                marginheight = 0)
+  })
+  
+  output$frame1 <- renderUI({
+    tags$iframe(src="https://docs.google.com/presentation/d/1_ymakXkcVZJLOYZ6lp1sMMfB9bjWN0FA06cvKqrmIfU/embed?start=false&loop=false&delayms=3000",
+                width = 900,
+                height = 528.57,
+                frameborder = 0,
+                allowfullscreen="allowfullscreen",
+                marginheight = 0)
+  })
+  
+  output$frame2 <- renderUI({
+    tags$iframe(src="https://docs.google.com/presentation/d/1_ymakXkcVZJLOYZ6lp1sMMfB9bjWN0FA06cvKqrmIfU/embed?start=false&loop=false&delayms=3000",
+                width = 900,
+                height = 528.57,
+                frameborder = 0,
+                allowfullscreen="allowfullscreen",
+                marginheight = 0)
+  })
   
 }
 
